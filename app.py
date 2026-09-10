@@ -76,29 +76,66 @@ if image_a_traiter:
                 st.rerun()
                 
     with col2:
-        if st.session_state['schema_ready']:
-            st.image("temp_output.jpg", caption="Schéma d'exercice", use_container_width=True)
-            st.subheader("📝 À toi de jouer !")
-            
-            labels = st.session_state['true_labels']
-            
-            # Création dynamique des champs
-            for i in range(len(labels)):
-                st.text_input(f"Légende n°{i+1}", key=f"rep_{i}")
-            
-            st.markdown("---")
-            
-            if st.button("Vérifier mes réponses", type="primary"):
-                st.subheader("Correction :")
-                score = 0
-                for i, vrai_texte in enumerate(labels):
-                    reponse_user = st.session_state.get(f"rep_{i}", "").strip().lower()
-                    vrai_texte_propre = vrai_texte.strip().lower()
+            if st.session_state['schema_ready']:
+                st.image("temp_output.jpg", caption="Schéma d'exercice", use_container_width=True)
+                st.subheader("📝 À toi de jouer !")
+                
+                labels = st.session_state['true_labels']
+                
+                # Création dynamique des champs avec case à cocher "Ignorer"
+                for i in range(len(labels)):
+                    col_input, col_ignore = st.columns([3, 1])
+                    with col_input:
+                        st.text_input(f"Légende n°{i+1}", key=f"rep_{i}")
+                    with col_ignore:
+                        st.write("") # Alignement vertical pour centrer avec le texte
+                        st.write("")
+                        # La case à cocher pour exclure les logos/marques
+                        st.checkbox("Ignorer 🗑️", key=f"ignore_{i}")
+                
+                st.markdown("---")
+                
+                if st.button("Vérifier mes réponses", type="primary"):
+                    st.subheader("Correction :")
+                    score = 0
+                    questions_valides = 0
                     
-                    if reponse_user and (reponse_user in vrai_texte_propre or vrai_texte_propre in reponse_user):
-                        st.success(f"N°{i+1} : ✅ Correct ! ({vrai_texte})")
-                        score += 1
-                    else:
-                        st.error(f"N°{i+1} : ❌ Faux. La réponse était : **{vrai_texte}**")
+                    for i, vrai_texte in enumerate(labels):
+                        # Si la case "Ignorer" est cochée, on passe sans pénaliser
+                        if st.session_state.get(f"ignore_{i}", False):
+                            continue
+                            
+                        questions_valides += 1
+                        reponse_user = st.session_state.get(f"rep_{i}", "").strip().lower()
+                        vrai_texte_propre = vrai_texte.strip().lower()
                         
-                st.metric(label="Score final", value=f"{score} / {len(labels)}")
+                        if reponse_user and (reponse_user in vrai_texte_propre or vrai_texte_propre in reponse_user):
+                            st.success(f"N°{i+1} : ✅ Correct ! ({vrai_texte})")
+                            score += 1
+                        else:
+                            st.error(f"N°{i+1} : ❌ Faux. La réponse était : **{vrai_texte}**")
+                    
+                    # Calcul du score et gestion des records
+                    if questions_valides > 0:
+                        pourcentage = int((score / questions_valides) * 100)
+                        st.metric(label="Score de la session", value=f"{score} / {questions_valides} ({pourcentage}%)")
+                        
+                        # Lecture du meilleur score existant
+                        fichier_score = f"{image_a_traiter}_score.json"
+                        meilleur_pourcentage = 0
+                        
+                        if os.path.exists(fichier_score):
+                            with open(fichier_score, "r") as f:
+                                meilleur_pourcentage = json.load(f).get("meilleur_pourcentage", 0)
+                                
+                        # Mise à jour si le record est battu
+                        if pourcentage > meilleur_pourcentage:
+                            meilleur_pourcentage = pourcentage
+                            with open(fichier_score, "w") as f:
+                                json.dump({"meilleur_pourcentage": meilleur_pourcentage}, f)
+                            st.balloons()
+                            st.success("Nouveau record établi ! 🏆")
+                            
+                        st.info(f"Record absolu sur ce schéma : {meilleur_pourcentage}%")
+                    else:
+                        st.warning("Toutes les légendes ont été ignorées. Le score n'a pas pu être calculé.")
