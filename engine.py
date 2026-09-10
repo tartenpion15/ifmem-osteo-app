@@ -8,24 +8,33 @@ def create_blind_schema(image_path, output_path):
     if img is None:
         raise FileNotFoundError(f"Impossible de trouver l'image : {image_path}")
         
+    # --- REDIMENSIONNEMENT FORCÉ (Upscaling pour les petites images) ---
+    height, width = img.shape[:2]
+    # Si l'image fait moins de 1000 pixels de large, on la grossit artificiellement
+    if width < 1000:
+        ratio = 1000 / width
+        # INTER_CUBIC est un algorithme qui lisse la pixellisation lors de l'agrandissement
+        img = cv2.resize(img, (int(width * ratio), int(height * ratio)), interpolation=cv2.INTER_CUBIC)
+    # -------------------------------------------------------------------
+        
     mask = np.zeros(img.shape[:2], dtype="uint8")
     
-    # --- NOUVEAU : PRÉ-PROCESSING (Nettoyage de la donnée visuelle) ---
+    # --- PRÉ-PROCESSING (Nettoyage de la donnée visuelle) ---
     # 1. Conversion en niveaux de gris
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     
     # 2. Augmentation agressive du contraste (alpha = contraste, beta = luminosité)
     gray_contrasted = cv2.convertScaleAbs(gray, alpha=1.5, beta=20)
     
-    # 3. Lecture avec un "mag_ratio" de 2.0 (l'IA zoome x2 en interne pour mieux lire les petits pixels)
+    # 3. Lecture avec un zoom artificiel
     results = reader.readtext(gray_contrasted, mag_ratio=2.0)
-    # ------------------------------------------------------------------
+    # --------------------------------------------------------
     
     boxes = []
     true_texts = []
     
     for (bbox, text, prob) in results:
-        # On garde notre filtre de confiance
+        # Filtre anti-bruit : on ignore les textes où l'IA n'est pas sûre à 25%
         if prob < 0.25:
             continue
             
@@ -33,17 +42,20 @@ def create_blind_schema(image_path, output_path):
         tl_x, tl_y = int(tl[0]), int(tl[1])
         br_x, br_y = int(br[0]), int(br[1])
         
+        # Marge pour bien recouvrir tout le mot
         padding = 3
         tl_x, tl_y = max(0, tl_x - padding), max(0, tl_y - padding)
         br_x, br_y = min(img.shape[1], br_x + padding), min(img.shape[0], br_y + padding)
         
+        # Dessin du masque d'effacement
         cv2.rectangle(mask, (tl_x, tl_y), (br_x, br_y), 255, -1)
         boxes.append((tl_x, tl_y, br_x, br_y))
         true_texts.append(text)
         
-    # L'effacement (Inpainting) se fait bien sur l'image 'img' d'origine pour garder les couleurs
+    # Effacement magique (Inpainting) sur la nouvelle grande image
     result_img = cv2.inpaint(img, mask, inpaintRadius=5, flags=cv2.INPAINT_TELEA)
     
+    # Ajout des pastilles numérotées
     for i, box in enumerate(boxes):
         tl_x, tl_y, br_x, br_y = box
         c_x = int((tl_x + br_x) / 2)
