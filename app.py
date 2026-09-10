@@ -2,6 +2,7 @@ import streamlit as st
 import os
 import shutil
 import json
+import requests
 from engine import create_blind_schema
 
 # --- CONFIGURATION INITIALE ---
@@ -13,7 +14,6 @@ st.set_page_config(page_title="Révision Ostéo - IFMEM", page_icon="🦴", layo
 
 # --- FONCTIONS UTILITAIRES ---
 def get_score(nom_fichier):
-    """Va lire le fichier JSON pour récupérer le meilleur score d'un schéma."""
     chemin_score = os.path.join(BANQUE_DIR, f"{nom_fichier}_score.json")
     if os.path.exists(chemin_score):
         try:
@@ -24,9 +24,7 @@ def get_score(nom_fichier):
     return 0
 
 def format_nom_schema(nom_fichier):
-    """Formate l'affichage dans la liste déroulante : Nom Propre + Score."""
     score = get_score(nom_fichier)
-    # Nettoie le nom du fichier pour l'affichage (enlève .jpg, remplace les _ par des espaces)
     nom_propre = nom_fichier.replace('.jpg', '').replace('.png', '').replace('.jpeg', '').replace('_', ' ').title()
     
     if score > 0:
@@ -54,22 +52,39 @@ with st.sidebar:
 
     if mode == "➕ Ajouter un schéma":
         st.subheader("Nouvel import")
-        uploaded_file = st.file_uploader("Image", type=["jpg", "jpeg", "png"], label_visibility="collapsed")
-        if uploaded_file:
-            image_a_traiter = "temp_input.jpg"
-            with open(image_a_traiter, "wb") as f:
-                f.write(uploaded_file.getbuffer())
-            
-            nom_fichier = st.text_input("Nom du schéma (sans espace, utilise des '_' ex: crane_face) :")
-            if st.button("💾 Sauvegarder dans la banque", use_container_width=True):
-                if nom_fichier:
-                    # Sécurise l'extension
+        type_ajout = st.radio("Méthode d'ajout :", ["Fichier local", "Lien Internet (URL)"], horizontal=True)
+        
+        nom_fichier = st.text_input("Nom du schéma (ex: crane_face) :")
+        
+        if type_ajout == "Fichier local":
+            uploaded_file = st.file_uploader("Image", type=["jpg", "jpeg", "png"], label_visibility="collapsed")
+            if uploaded_file and nom_fichier:
+                if st.button("💾 Enregistrer dans la banque", use_container_width=True):
                     if not nom_fichier.endswith('.jpg'):
                         nom_fichier += '.jpg'
                     chemin_sauvegarde = os.path.join(BANQUE_DIR, nom_fichier)
-                    shutil.copy(image_a_traiter, chemin_sauvegarde)
+                    with open(chemin_sauvegarde, "wb") as f:
+                        f.write(uploaded_file.getbuffer())
                     st.success("Sauvegardé avec succès !")
                     st.rerun()
+        else:
+            url_image = st.text_input("Coller l'URL directe de l'image :")
+            if url_image and nom_fichier:
+                if st.button("📥 Télécharger depuis le lien", use_container_width=True):
+                    try:
+                        response = requests.get(url_image, timeout=10)
+                        if response.status_code == 200:
+                            if not nom_fichier.endswith('.jpg'):
+                                nom_fichier += '.jpg'
+                            chemin_sauvegarde = os.path.join(BANQUE_DIR, nom_fichier)
+                            with open(chemin_sauvegarde, "wb") as f:
+                                f.write(response.content)
+                            st.success("Image téléchargée et enregistrée !")
+                            st.rerun()
+                        else:
+                            st.error("Erreur : Le lien ne renvoie pas d'image valide.")
+                    except Exception as e:
+                        st.error(f"Erreur de téléchargement : {e}")
     else:
         if not fichiers_banque:
             st.info("La banque est vide. Ajoute un schéma d'abord.")
@@ -87,7 +102,6 @@ if image_a_traiter:
         st.session_state['schema_ready'] = False
         st.session_state['current_img_path'] = image_a_traiter
 
-    # Modification des largeurs de colonnes (plus de place pour l'image sur grand écran)
     col_img, col_quiz = st.columns([1.2, 1])
     
     with col_img:
@@ -109,7 +123,6 @@ if image_a_traiter:
             st.subheader("📝 À toi de jouer !")
             labels = st.session_state['true_labels']
             
-            # Utilisation du formulaire pour une ergonomie parfaite sur mobile
             with st.form("quiz_form"):
                 for i in range(len(labels)):
                     c1, c2 = st.columns([3, 1])
@@ -119,10 +132,8 @@ if image_a_traiter:
                         st.write("") 
                         st.checkbox("Ignorer 🗑️", key=f"ignore_{i}")
                         
-                # Bouton de validation global
                 submitted = st.form_submit_button("Vérifier mes réponses 🚀", use_container_width=True)
             
-            # Correction affichée uniquement après clic sur le bouton du formulaire
             if submitted:
                 st.markdown("### 📊 Résultats")
                 score = 0
@@ -142,11 +153,9 @@ if image_a_traiter:
                     else:
                         st.error(f"**N°{i+1}.** ❌ Ta réponse: *{reponse_user if reponse_user else 'Vide'}* ➔ **Correction: {vrai_texte}**")
                 
-                # Gestion du score final
                 if questions_valides > 0:
                     pourcentage = int((score / questions_valides) * 100)
                     
-                    # Affichage graphique du score
                     col_score1, col_score2 = st.columns(2)
                     col_score1.metric("Score", f"{score} / {questions_valides}")
                     col_score2.metric("Précision", f"{pourcentage}%")
