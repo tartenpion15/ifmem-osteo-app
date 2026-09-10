@@ -9,13 +9,23 @@ def create_blind_schema(image_path, output_path):
         raise FileNotFoundError(f"Impossible de trouver l'image : {image_path}")
         
     mask = np.zeros(img.shape[:2], dtype="uint8")
-    results = reader.readtext(image_path)
+    
+    # --- NOUVEAU : PRÉ-PROCESSING (Nettoyage de la donnée visuelle) ---
+    # 1. Conversion en niveaux de gris
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    
+    # 2. Augmentation agressive du contraste (alpha = contraste, beta = luminosité)
+    gray_contrasted = cv2.convertScaleAbs(gray, alpha=1.5, beta=20)
+    
+    # 3. Lecture avec un "mag_ratio" de 2.0 (l'IA zoome x2 en interne pour mieux lire les petits pixels)
+    results = reader.readtext(gray_contrasted, mag_ratio=2.0)
+    # ------------------------------------------------------------------
     
     boxes = []
-    true_texts = [] # Pour stocker les vraies réponses
+    true_texts = []
     
     for (bbox, text, prob) in results:
-        # FILTRE : Si l'IA est sûre à moins de 25%, on ignore (évite les fausses détections)
+        # On garde notre filtre de confiance
         if prob < 0.25:
             continue
             
@@ -29,12 +39,11 @@ def create_blind_schema(image_path, output_path):
         
         cv2.rectangle(mask, (tl_x, tl_y), (br_x, br_y), 255, -1)
         boxes.append((tl_x, tl_y, br_x, br_y))
-        true_texts.append(text) # On sauvegarde le vrai mot
+        true_texts.append(text)
         
-    # Effacement du texte
+    # L'effacement (Inpainting) se fait bien sur l'image 'img' d'origine pour garder les couleurs
     result_img = cv2.inpaint(img, mask, inpaintRadius=5, flags=cv2.INPAINT_TELEA)
     
-    # Ajout des pastilles numérotées sur l'image nettoyée
     for i, box in enumerate(boxes):
         tl_x, tl_y, br_x, br_y = box
         c_x = int((tl_x + br_x) / 2)
@@ -45,5 +54,4 @@ def create_blind_schema(image_path, output_path):
         
     cv2.imwrite(output_path, result_img)
     
-    # On renvoie la liste des mots originaux pour la correction
     return true_texts
